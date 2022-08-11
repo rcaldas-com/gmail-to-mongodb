@@ -7,7 +7,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+AUTH_FILE = 'oauth.json'
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+LABEL = 'Boragora'
+
 
 def main():
     creds = None
@@ -18,7 +22,7 @@ def main():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                'pc-oauth-boragora.json', SCOPES)
+                AUTH_FILE, SCOPES)
             creds = flow.run_console()
             # creds = flow.run_local_server(port=0)
         with open('token.json', 'w') as token:
@@ -30,7 +34,7 @@ def main():
         result = service.users().labels().list(userId='me').execute()
         labels = result.get('labels', [])
         for i in labels:
-            if i['name'] == 'Boragora':
+            if i['name'] == LABEL:
                 label = i['id']
         result = service.users().messages().list(userId='me', labelIds=label).execute()
         mails = result.get('messages', [])
