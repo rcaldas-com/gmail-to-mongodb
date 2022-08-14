@@ -1,7 +1,8 @@
 from datetime import datetime
-import os.path
+from os import getenv, path
 import base64
 from io import BytesIO
+import email
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -12,18 +13,25 @@ from werkzeug.utils import secure_filename
 from pymongo import MongoClient
 import gridfs
 
-db = MongoClient()
+MONGO_URI = getenv('MONGO_URI', 'mongodb://localhost/gmail')
+db = MongoClient(MONGO_URI).get_database()
 fs = gridfs.GridFS(db)
+maildb = db.mail
 
+# Path to file with Google Credentials
 AUTH_FILE = 'oauth.json'
-
+# Scope of API to generate the token file in 'token.json' path
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+# Label to search emails in
 LABEL = 'Boragora'
+# From email header content to match
+FROM = 'magmacontabilidade'
 
 
 def main():
     creds = None
-    if os.path.exists('token.json'):
+    if path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -35,10 +43,10 @@ def main():
             # creds = flow.run_local_server(port=0)
         with open('token.json', 'w') as token:
             token.write(creds.to_json())
-
-
     try:
         service = build('gmail', 'v1', credentials=creds)
+
+        # Get Label ID
         result = service.users().labels().list(userId='me').execute()
         label = False
         for i in result.get('labels', []):
@@ -46,73 +54,82 @@ def main():
                 label = i['id']
         if not label:
             print('Label not found')
-            return 
+            return
+
+        # Get email list
         result = service.users().messages().list(userId='me', labelIds=label).execute()
         mails = result.get('messages', [])
-        mail_list = []
         for mailid in mails:
+            # maildb.delete_many({}) # Delete all from db
+            if maildb.find_one({'mailid': mailid['id']}):
+                continue # Already in database
+            
+            # Get email data
             mail = service.users().messages().get(userId='me', id=mailid['id']).execute()
             mail_item = {
-                'id': mailid['id'],
+                'mailid': mailid['id'],
                 'snippet': mail['snippet'],
                 'files': [],
             }
             for k in mail['payload']['headers']:
-                if k['name'] == 'Subject':
+                if k['name'] == 'From':
+                    mail_item['from'] = k['value']
+                elif k['name'] == 'Subject':
                     mail_item['subject'] = k['value']
                 elif k['name'] == 'Date':
-                    mail_item['date'] = k['value']
-                elif k['name'] == 'From':
-                    mail_item['from'] = k['value']
-            parts = mail['payload']['parts']
-            for part in parts:
-                if part['partId'] == '0':
-                    for i in part['parts']:
-                        for j in i['body']:
-                            if j == 'data':
-                                try:
-                                    message_bytes = base64.b64decode(i['body'][j].encode('utf-8'))
-                                    mail_item['body'] = message_bytes.decode('utf-8')
-                                except Exception:
-                                    pass
-                else:
-                    if not part['filename']:
-                        print('No Filename in part > 0')
+                    date = k['value'].split('(')[0].strip()
+                    mail_item['date'] = datetime.strptime(date, '%a, %d %b %Y %X %z')
+
+            # Check sender
+            if not FROM in mail_item['from']:
+                continue # Not from sender "FROM"
+
+            # If mail is just text
+            if mail['payload']['mimeType'] in ['text/plain', 'text/html']:
+                msg = email.message_from_string(mail['payload']['body']['data'])
+                message_bytes = base64.urlsafe_b64decode(msg.get_payload(decode=True))
+                mail_item[mail['payload']['mimeType'].split('/')[1]] = message_bytes.decode('utf-8')
+            else: # or have parts
+                if mail['payload']['mimeType'] == 'multipart/mixed':
+                    parts = mail['payload']['parts']
+                elif mail['payload']['mimeType'] == 'multipart/alternative':
+                    parts = [ mail['payload'] ]
+
+                for part in parts:
+                    if part['mimeType'] == 'multipart/alternative':
+                        for i in part['parts']:
+                            if i['mimeType'] in ['text/plain', 'text/html']:
+                                msg = email.message_from_string(i['body']['data'])
+                                message_bytes = base64.urlsafe_b64decode(msg.get_payload(decode=True))
+                                mail_item[i['mimeType'].split('/')[1]] = message_bytes.decode('utf-8')
+                            else:
+                                print(f"Not identified:\n{i['mimeType']}")
+                                return
+                    elif part['filename']:
+                        filename = secure_filename(part['filename'])
+                        # file = service.users().messages().attachments().get(userId='me', messageId=mailid['id'], id=part['body']['attachmentId']).execute()
+                        # file_id = fs.put(BytesIO(base64.b64decode(file['data'])), filename=filename)
+                        file_item = {
+                        #     'id': file_id,
+                            'name': filename,
+                            'type': part['mimeType'],
+                        }
+                        mail_item['files'].append(file_item)
+                    else:
+                        print(f"Not texts or file, not predicted:\n{part['mimeType']}")
                         return
-                    filename = secure_filename(part['filename'])
-                    file = service.users().messages().attachments().get(userId='me', messageId=mailid['id'], id=part['body']['attachmentId']).execute()
-
-                    # print(file['data'])
-
-                    file_id = fs.put(BytesIO(base64.b64decode(file['data']+'===')), filename=filename)
-                    file_item = {
-                        'id': file_id,
-                        'name': filename,
-                        'type': part['mimeType'],
-                    }
-                    mail_item['files'].append(file_item)
-                print('\n')
-
-            for i in mail_item.keys():
-                print(i)
-                print(mail_item[i])
-
-            mail_list.append(mail_item)
             
-            # for k in parts:
-            #     print(k)
-            #     # print(mail['payload']['parts'][k])
-            #     print('\n\n')
-
-            # # print('\n\n')
-            return
-
-
+            # Print dict created
+            for i in mail_item.keys():
+                print(f'{i}\n{mail_item[i]}\n')
+            # Wait for check
+            input('Enter to continue...')
+            # Save to database
+            maildb.insert_one(mail_item)
 
     except HttpError as error:
-        # TODO(developer) - Handle errors from gmail API.
+        # Handle errors from gmail API.
         print(f'An error occurred: {error}')
-
 
 if __name__ == '__main__':
     main()

@@ -3,11 +3,17 @@ Get emails from a GMail label, read attachments data and save to MongoDB.
 Python GMail API + MongoDB
 ===========================
 
+
 Requirements
 ------------
 * Google's json credential file `oauth.json`
-     - Create one in [Google Cloud Console](https://console.cloud.google.com/apis/dashboard)
+  - Create one in [Google Cloud Console](https://console.cloud.google.com/apis/dashboard)
 * Python pip or docker
+* MongoDB
+  - You can run a temp MongoDB instance in a new terminal with:
+
+    `docker run --rm -it -v /tmp/mongodb:/data/db -p 27017:27017 mongo`
+
 
 How to run
 -----------
@@ -24,6 +30,8 @@ How to run
 
   `python3 gmail.py`
 
+
 Settings
 ----------
 * Set `LABEL` var with the label name to get emails from`
+* Set `FROM` var with the string to match "from" email header
