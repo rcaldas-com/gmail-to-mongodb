@@ -14,7 +14,6 @@ Requirements
 
     `docker run --rm -it -v /tmp/mongodb:/data/db -p 27017:27017 mongo`
 
-
 How to run
 -----------
 * You can create a venv inside repository dir with
@@ -35,3 +34,4 @@ Settings
 ----------
 * Set `LABEL` var with the label name to get emails from`
 * Set `FROM` var with the string to match "from" email header
+* The default connection URI is `mongodb://localhost/gmail`, set the env MONGO_URI to change
