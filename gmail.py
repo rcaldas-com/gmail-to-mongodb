@@ -11,6 +11,7 @@ from googleapiclient.errors import HttpError
 from werkzeug.utils import secure_filename
 from pymongo import MongoClient
 import gridfs
+import fitz
 
 MONGO_URI = getenv('MONGO_URI', 'mongodb://localhost/gmail')
 db = MongoClient(MONGO_URI).get_database()
@@ -59,7 +60,6 @@ def main():
         result = service.users().messages().list(userId='me', labelIds=label).execute()
         mails = result.get('messages', [])
         for mailid in mails:
-            # maildb.delete_many({}) # Delete all from db
             if maildb.find_one({'mailid': mailid['id']}):
                 continue # Already in database
             
@@ -107,11 +107,12 @@ def main():
                     elif part['filename']:
                         filename = secure_filename(part['filename'])
                         file = service.users().messages().attachments().get(userId='me', messageId=mailid['id'], id=part['body']['attachmentId']).execute()
-                        file_id = fs.put(base64.urlsafe_b64decode(file['data']), encoding="utf-8", filename=filename)
+                        file_id = fs.put(base64.urlsafe_b64decode(file['data']), content_type=part['mimeType'], filename=filename)
                         file_item = {
                             'id': file_id,
                             'name': filename,
                             'type': part['mimeType'],
+                            # 'size': '?',
                         }
                         mail_item['files'].append(file_item)
                     else:
@@ -133,16 +134,39 @@ def main():
 def get_file():
     mails = maildb.find({})
     for i in mails:
+        # If have files get the first file
         if i.get('files') and len(i['files']) > 0:
-            print(i['files'][0])
-            filename = secure_filename(i['files'][0]['name'])
-            with open(f'/tmp/{filename}', 'wb') as f:
-                f.write(fs.get(i['files'][0]['id']).read())
-            print(i['files'][0]['id'])
+            # # Save file to '/tmp' dir
+            # filename = secure_filename(i['files'][0]['name'])
+            # with open(f'/tmp/{filename}', 'wb') as f:
+            #     f.write(fs.get(i['files'][0]['id']).read())
+
+            import_pdf(fs.get(i['files'][0]['id']))
             return
     print('No files')
 
+def import_pdf(file):
+    if file.content_type != 'application/pdf':
+        print('Not pdf')
+        return False
+    data = []
+    with fitz.open(stream=file.read(), filetype='pdf') as doc:
+        pages = doc.page_count
+        for page in doc:
+            data += page.get_text().split('\n')
+
+    for i in data:
+        print(i)
+    print(f'\nPages: {pages}')
+
+
+
+
 if __name__ == '__main__':
+    # ! Clear database
+    # maildb.delete_many({}) 
+
     # main()
     get_file()
+
 
