@@ -1,7 +1,6 @@
 from datetime import datetime
 from os import getenv, path
 import base64
-from io import BytesIO
 import email
 
 from google.auth.transport.requests import Request
@@ -107,10 +106,10 @@ def main():
                                 return
                     elif part['filename']:
                         filename = secure_filename(part['filename'])
-                        # file = service.users().messages().attachments().get(userId='me', messageId=mailid['id'], id=part['body']['attachmentId']).execute()
-                        # file_id = fs.put(BytesIO(base64.b64decode(file['data'])), filename=filename)
+                        file = service.users().messages().attachments().get(userId='me', messageId=mailid['id'], id=part['body']['attachmentId']).execute()
+                        file_id = fs.put(base64.urlsafe_b64decode(file['data']), encoding="utf-8", filename=filename)
                         file_item = {
-                        #     'id': file_id,
+                            'id': file_id,
                             'name': filename,
                             'type': part['mimeType'],
                         }
@@ -131,6 +130,19 @@ def main():
         # Handle errors from gmail API.
         print(f'An error occurred: {error}')
 
+def get_file():
+    mails = maildb.find({})
+    for i in mails:
+        if i.get('files') and len(i['files']) > 0:
+            print(i['files'][0])
+            filename = secure_filename(i['files'][0]['name'])
+            with open(f'/tmp/{filename}', 'wb') as f:
+                f.write(fs.get(i['files'][0]['id']).read())
+            print(i['files'][0]['id'])
+            return
+    print('No files')
+
 if __name__ == '__main__':
-    main()
+    # main()
+    get_file()
 
